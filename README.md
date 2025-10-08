@@ -115,8 +115,13 @@ We're looking for:
 # View logs for all services
 docker-compose logs -f
 
-# View logs for specific service
+# View logs for specific service (recommended for debugging)
 docker-compose logs -f workflow-service
+docker-compose logs -f device-service
+docker-compose logs -f sample-service
+
+# View recent logs without following
+docker-compose logs --tail=50 workflow-service
 
 # Restart a specific service
 docker-compose restart workflow-service

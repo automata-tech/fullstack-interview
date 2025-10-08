@@ -4,9 +4,20 @@ import redis
 import json
 import os
 from datetime import datetime
+import logging
+import sys
 
 app = Flask(__name__)
 CORS(app)
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[logging.StreamHandler(sys.stdout)]
+)
+logger = logging.getLogger(__name__)
+
+app.logger.setLevel(logging.INFO)
 
 # Redis connection
 redis_client = redis.from_url(os.getenv('REDIS_URL', 'redis://localhost:6379'))
@@ -81,12 +92,16 @@ def create_sample():
 
     barcode = data.get('barcode')
     if not barcode:
+        logger.error("Sample creation missing barcode")
         return jsonify({'error': 'barcode is required'}), 400
 
     samples = get_all_samples()
 
     if barcode in samples:
+        logger.warning(f"Sample already exists: {barcode}")
         return jsonify({'error': 'Sample already exists'}), 409
+
+    logger.info(f"Creating sample: {barcode}")
 
     sample = {
         'barcode': barcode,
@@ -99,6 +114,7 @@ def create_sample():
     samples[barcode] = sample
     save_samples(samples)
 
+    logger.info(f"Sample {barcode} created successfully")
     return jsonify(sample), 201
 
 @app.route('/samples/<barcode>/location', methods=['PUT'])
@@ -128,16 +144,22 @@ def validate_samples():
     barcodes = data.get('barcodes', [])
 
     if not barcodes:
+        logger.error("Validation request missing barcodes")
         return jsonify({'error': 'barcodes array is required'}), 400
+
+    logger.info(f"Validating {len(barcodes)} sample(s)")
 
     samples = get_all_samples()
     results = []
 
     for barcode in barcodes:
+        exists = barcode in samples
         results.append({
             'barcode': barcode,
-            'exists': barcode in samples
+            'exists': exists
         })
+        if not exists:
+            logger.warning(f"Sample not found: {barcode}")
 
     return jsonify(results)
 
@@ -146,4 +168,4 @@ if __name__ == '__main__':
     if not get_all_samples():
         initialize_samples()
 
-    app.run(host='0.0.0.0', port=5002, debug=True)
+    app.run(host='0.0.0.0', port=5002, debug=False)

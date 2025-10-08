@@ -5,9 +5,20 @@ import json
 import os
 import time
 from datetime import datetime
+import logging
+import sys
 
 app = Flask(__name__)
 CORS(app)
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[logging.StreamHandler(sys.stdout)]
+)
+logger = logging.getLogger(__name__)
+
+app.logger.setLevel(logging.INFO)
 
 # Redis connection
 redis_client = redis.from_url(os.getenv('REDIS_URL', 'redis://localhost:6379'))
@@ -87,24 +98,29 @@ def get_device(device_id):
 def book_device(device_id):
     """Book a device for a workflow"""
     if device_id not in DEVICES:
+        logger.warning(f"Device not found: {device_id}")
         return jsonify({'error': 'Device not found'}), 404
 
     data = request.json
     workflow_id = data.get('workflow_id')
 
     if not workflow_id:
+        logger.error("Booking request missing workflow_id")
         return jsonify({'error': 'workflow_id required'}), 400
+
+    logger.info(f"Attempting to book device {device_id} for workflow {workflow_id}")
 
     current_status = get_device_status(device_id)
 
     if current_status != 'available':
+        logger.warning(f"Device {device_id} is not available (status: {current_status})")
         return jsonify({'error': 'Device is not available'}), 409
 
-    # Simulate some processing time that makes race condition more likely
     time.sleep(0.1)
 
     set_device_status(device_id, 'busy', workflow_id)
 
+    logger.info(f"Device {device_id} successfully booked by workflow {workflow_id}")
     return jsonify({
         'device_id': device_id,
         'status': 'busy',
@@ -116,18 +132,22 @@ def book_device(device_id):
 def release_device(device_id):
     """Release a device from a workflow"""
     if device_id not in DEVICES:
+        logger.warning(f"Device not found: {device_id}")
         return jsonify({'error': 'Device not found'}), 404
 
     data = request.json
     workflow_id = data.get('workflow_id')
 
-    # Verify the workflow owns this device
+    logger.info(f"Attempting to release device {device_id} from workflow {workflow_id}")
+
     current_workflow = redis_client.get(f'device:{device_id}:workflow')
     if current_workflow and current_workflow.decode('utf-8') != workflow_id:
+        logger.warning(f"Device {device_id} is booked by another workflow")
         return jsonify({'error': 'Device is booked by another workflow'}), 403
 
     set_device_status(device_id, 'available')
 
+    logger.info(f"Device {device_id} released successfully")
     return jsonify({
         'device_id': device_id,
         'status': 'available',
@@ -138,20 +158,23 @@ def release_device(device_id):
 def execute_operation(device_id):
     """Execute an operation on a device"""
     if device_id not in DEVICES:
+        logger.warning(f"Device not found: {device_id}")
         return jsonify({'error': 'Device not found'}), 404
 
     data = request.json
     operation = data.get('operation')
     workflow_id = data.get('workflow_id')
 
-    # Verify the workflow owns this device
+    logger.info(f"Executing operation '{operation}' on device {device_id} for workflow {workflow_id}")
+
     current_workflow = redis_client.get(f'device:{device_id}:workflow')
     if not current_workflow or current_workflow.decode('utf-8') != workflow_id:
+        logger.warning(f"Device {device_id} not booked by workflow {workflow_id}")
         return jsonify({'error': 'Device not booked by this workflow'}), 403
 
-    # Simulate operation execution
     time.sleep(0.5)
 
+    logger.info(f"Operation '{operation}' completed on device {device_id}")
     return jsonify({
         'device_id': device_id,
         'operation': operation,
@@ -165,4 +188,4 @@ if __name__ == '__main__':
         if not redis_client.exists(f'device:{device_id}:status'):
             set_device_status(device_id, 'available')
 
-    app.run(host='0.0.0.0', port=5001, debug=True)
+    app.run(host='0.0.0.0', port=5001, debug=False)

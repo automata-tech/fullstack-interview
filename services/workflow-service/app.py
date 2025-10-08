@@ -6,9 +6,20 @@ import os
 import requests
 from datetime import datetime
 import uuid
+import logging
+import sys
 
 app = Flask(__name__)
 CORS(app)
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[logging.StreamHandler(sys.stdout)]
+)
+logger = logging.getLogger(__name__)
+
+app.logger.setLevel(logging.INFO)
 
 # Redis connection
 redis_client = redis.from_url(os.getenv('REDIS_URL', 'redis://localhost:6379'))
@@ -75,6 +86,8 @@ def create_workflow():
     if not name or not device_id:
         return jsonify({'error': 'name and device_id are required'}), 400
 
+    logger.info(f"Creating workflow: {name} (ID: {workflow_id}) for device: {device_id}")
+
     workflow = {
         'id': workflow_id,
         'name': name,
@@ -89,19 +102,25 @@ def create_workflow():
     workflows[workflow_id] = workflow
     save_workflows(workflows)
 
+    logger.info(f"Workflow {workflow_id} created successfully")
     return jsonify(workflow), 201
 
 @app.route('/workflows/<workflow_id>/start', methods=['POST'])
 def start_workflow(workflow_id):
     """Start a workflow - books device and begins execution"""
+    logger.info(f"Starting workflow: {workflow_id}")
+
     workflow = get_workflow(workflow_id)
     if not workflow:
+        logger.error(f"Workflow not found: {workflow_id}")
         return jsonify({'error': 'Workflow not found'}), 404
 
     if workflow['status'] != 'created':
+        logger.warning(f"Workflow {workflow_id} already started or completed")
         return jsonify({'error': 'Workflow already started or completed'}), 400
 
     device_id = workflow['device_id']
+    logger.info(f"Booking device {device_id} for workflow {workflow_id}")
 
     try:
         response = requests.post(
@@ -111,35 +130,41 @@ def start_workflow(workflow_id):
         )
 
         if response.status_code != 200:
+            logger.error(f"Failed to book device {device_id}: {response.status_code} - {response.text}")
             return jsonify({
                 'error': 'Failed to book device',
                 'details': response.json()
             }), response.status_code
 
-        # Update workflow status
         workflow['status'] = 'running'
         workflow['started_at'] = datetime.utcnow().isoformat() + 'Z'
         update_workflow(workflow_id, workflow)
 
+        logger.info(f"Workflow {workflow_id} started successfully")
         return jsonify(workflow)
 
     except requests.exceptions.RequestException as e:
+        logger.error(f"Error communicating with device service: {str(e)}")
         return jsonify({'error': f'Failed to communicate with device service: {str(e)}'}), 500
 
 @app.route('/workflows/<workflow_id>/complete', methods=['POST'])
 def complete_workflow(workflow_id):
     """Complete a workflow and release device"""
+    logger.info(f"Completing workflow: {workflow_id}")
+
     workflow = get_workflow(workflow_id)
     if not workflow:
+        logger.error(f"Workflow not found: {workflow_id}")
         return jsonify({'error': 'Workflow not found'}), 404
 
     if workflow['status'] != 'running':
+        logger.warning(f"Workflow {workflow_id} is not running")
         return jsonify({'error': 'Workflow is not running'}), 400
 
     device_id = workflow['device_id']
+    logger.info(f"Releasing device {device_id} from workflow {workflow_id}")
 
     try:
-        # Release the device
         response = requests.post(
             f'{DEVICE_API_URL}/devices/{device_id}/release',
             json={'workflow_id': workflow_id},
@@ -147,19 +172,21 @@ def complete_workflow(workflow_id):
         )
 
         if response.status_code != 200:
+            logger.error(f"Failed to release device {device_id}: {response.status_code}")
             return jsonify({
                 'error': 'Failed to release device',
                 'details': response.json()
             }), response.status_code
 
-        # Update workflow status
         workflow['status'] = 'completed'
         workflow['completed_at'] = datetime.utcnow().isoformat() + 'Z'
         update_workflow(workflow_id, workflow)
 
+        logger.info(f"Workflow {workflow_id} completed successfully")
         return jsonify(workflow)
 
     except requests.exceptions.RequestException as e:
+        logger.error(f"Error communicating with device service: {str(e)}")
         return jsonify({'error': f'Failed to communicate with device service: {str(e)}'}), 500
 
 @app.route('/workflows/<workflow_id>/execute-step', methods=['POST'])
@@ -210,4 +237,4 @@ def execute_step(workflow_id):
         return jsonify({'error': f'Failed to communicate with device service: {str(e)}'}), 500
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5003, debug=True)
+    app.run(host='0.0.0.0', port=5003, debug=False)

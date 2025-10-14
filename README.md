@@ -17,6 +17,36 @@ The system consists of:
   - `sample-service`: Tracks samples (port 5002)
 - **Infrastructure**: Redis for caching and state management
 
+### Architecture Diagram
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                          Browser                                │
+│                     (localhost:3000)                            │
+└───────────────┬─────────────────┬─────────────────┬─────────────┘
+                │                 │                 │
+                │ HTTP            │ HTTP            │ HTTP
+                │                 │                 │
+        ┌───────▼────────┐ ┌──────▼───────┐ ┌──────▼───────┐
+        │   Workflow     │ │   Device     │ │   Sample     │
+        │   Service      │ │   Service    │ │   Service    │
+        │   (port 5003)  │ │  (port 5001) │ │  (port 5002) │
+        └────────┬───────┘ └──────┬───────┘ └──────┬───────┘
+                 │                │                 │
+                 │ Redis Client   │ Redis Client    │ Redis Client
+                 │                │                 │
+        ┌────────▼────────────────▼─────────────────▼───────┐
+        │                    Redis                           │
+        │          (caching and state management)            │
+        └────────────────────────────────────────────────────┘
+```
+
+**Key Flows**:
+- Browser connects directly to all three backend services via HTTP
+- All services share Redis for state management and caching
+- Workflow service coordinates with device and sample services
+- Device service manages device availability and booking status
+
 ## Getting Started
 
 ### Prerequisites
